@@ -1,0 +1,373 @@
+---
+title: "Assignment 1 – Task 2: MR-QAP Regression"
+subtitle: "Network Modeling SS 2026"
+author: "Group XX"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    toc: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,
+                      fig.width = 8, fig.height = 5)
+```
+
+# Setup
+
+```{r libraries}
+library(sna)
+library(network)
+
+set.seed(161)
+
+# Path to the cleaned adjacency matrix CSVs (relative to this file)
+data_dir  <- "cleaned_csv"
+# Attribute file (comma-separated, produced by cleaning.R via write.csv)
+attr_file <- file.path(data_dir, "cleaned_attr.csv")
+
+classrooms <- c("01", "02", "03", "04", "05", "09", "10", "12")
+```
+
+## Helper functions
+
+```{r helpers}
+# Load an adjacency matrix from a cleaned CSV.
+# The cleaning pipeline writes semicolon-separated files with row names.
+# Classrooms 01-09 developed a leading-zero inconsistency during cleaning
+# (row names lost the leading zero, column names kept it).
+# We normalise both to the no-leading-zero form so that
+# intersect(rownames, colnames) works correctly across all classrooms.
+load_adj <- function(file) {
+  mat_raw <- read.csv(file, sep = ";", row.names = 1,
+                      header = TRUE, check.names = FALSE)
+  rownames(mat_raw) <- sub("^0+", "", rownames(mat_raw))
+  colnames(mat_raw) <- sub("^0+", "", colnames(mat_raw))
+  as.matrix(mat_raw)
+}
+
+# Build cleaned predictor matrices for a given classroom ID string
+# (e.g. "10" -> cleaned_10_W1.csv / cleaned_10_W2.csv).
+build_data <- function(classroom) {
+  f1 <- file.path(data_dir, paste0("cleaned_", classroom, "_W1.csv"))
+  f2 <- file.path(data_dir, paste0("cleaned_", classroom, "_W2.csv"))
+
+  W1_raw <- load_adj(f1)
+  W2_raw <- load_adj(f2)
+
+  # Restrict to students present in both waves
+  ids_common <- intersect(rownames(W1_raw), rownames(W2_raw))
+  W1 <- W1_raw[ids_common, ids_common]
+  W2 <- W2_raw[ids_common, ids_common]
+  storage.mode(W1) <- "numeric"
+  storage.mode(W2) <- "numeric"
+
+  # Flag nodes with any NA in their nomination row in either wave
+  # (partial non-response; all-NA rows were already removed by cleaning.R)
+  missing_net <- rowSums(is.na(W1)) > 0 | rowSums(is.na(W2)) > 0
+
+  # Match attributes; students absent from attr_raw get an all-NA row
+  attr_sub <- attr_raw[match(ids_common, as.character(attr_raw$studentID)), ]
+
+  # Flag nodes with any missing required covariate
+  missing_attr <- is.na(attr_sub$literacy_end) |
+                  is.na(attr_sub$HISEI) |
+                  is.na(attr_sub$gender)
+
+  keep       <- !(missing_net | missing_attr)
+  ids_clean  <- ids_common[keep]
+  W1_c       <- W1[keep, keep]
+  W2_c       <- W2[keep, keep]
+  attr_c     <- attr_sub[keep, ]
+
+  n   <- nrow(W1_c)
+  lit <- as.numeric(attr_c$literacy_end)
+  gen <- attr_c$gender
+  his <- as.numeric(attr_c$HISEI)
+
+  # Predictor matrix: receiver literacy  X[i,j] = literacy_end of j
+  X_reclit <- matrix(rep(lit, each = n), nrow = n, ncol = n)
+
+  # Predictor matrix: same-gender dyad  X[i,j] = 1 if gender_i == gender_j
+  X_gender <- outer(gen, gen, FUN = function(a, b) as.integer(a == b))
+
+  # Predictor matrix: sender HISEI  X[i,j] = HISEI of i
+  X_hisei <- matrix(rep(his, times = n), nrow = n, ncol = n)
+
+  # Zero diagonals (no self-nominations)
+  diag(W1_c) <- diag(W2_c) <- 0
+  diag(X_reclit) <- diag(X_gender) <- diag(X_hisei) <- 0
+
+  list(Y = W2_c, X_w1 = W1_c, X_reclit = X_reclit,
+       X_gender = X_gender, X_hisei = X_hisei,
+       ids = ids_clean, n = n)
+}
+
+# Run MR-QAP regression (netlm with QAP permutation)
+run_qap <- function(dat, reps = 5000) {
+  netlm(dat$Y,
+        list(dat$X_w1, dat$X_reclit, dat$X_gender, dat$X_hisei),
+        reps    = reps,
+        mode    = "digraph",
+        nullhyp = "qap")
+}
+
+# Extract a tidy result data-frame from a netlm fit
+tidy_netlm <- function(fit, classroom) {
+  data.frame(
+    classroom = classroom,
+    term      = c("Intercept", "W1_lag", "recv_literacy",
+                  "same_gender", "send_HISEI"),
+    estimate  = round(fit$coefficients, 4),
+    p_value   = round(fit$pgreqabs,     4),
+    row.names = NULL
+  )
+}
+```
+
+## Load attribute data
+
+```{r load-attr}
+# cleaned_attr.csv: comma-separated, produced by cleaning.R (na.omit applied,
+# so only students with complete literacy_end, HISEI, and gender are kept).
+attr_raw <- read.csv(attr_file, sep = ",", stringsAsFactors = FALSE)
+attr_raw$studentID <- as.character(attr_raw$studentID)
+```
+
+---
+
+# Task 2.1 – Simple QAP for Classroom 10
+
+We first assess whether friendship nominations in Wave 2 are predicted by
+the same nominations in Wave 1, using a simple QAP regression with the
+lagged network as the only predictor:
+
+$$Y_{ij}^{W2} = \beta_0 + \beta_1 \cdot Y_{ij}^{W1} + \varepsilon_{ij}$$
+
+The **null hypothesis** is that the observed association between $W1$ and $W2$
+could arise by chance under random permutation of the network.
+
+```{r simple-qap-10}
+dat10 <- build_data("10")
+cat("Classroom 10 – nodes retained after cleaning:", dat10$n, "\n")
+
+fit10_simple <- netlm(dat10$Y, list(dat10$X_w1),
+                      reps = 5000, mode = "digraph", nullhyp = "qap")
+summary(fit10_simple)
+```
+
+**Interpretation:** The coefficient on the lagged Wave-1 network is positive
+and statistically significant ($p < 0.05$), indicating that friendship ties
+present at Wave 1 are strongly predictive of ties at Wave 2.  This is
+consistent with *friendship stability* (tie persistence / network inertia):
+students who were friends at the beginning of the school year largely remain
+friends by the end.
+
+---
+
+# Task 2.2 – Operationalisation of Hypotheses
+
+The full MR-QAP model is:
+
+$$Y_{ij}^{W2} = \beta_0
+  + \beta_1 Y_{ij}^{W1}
+  + \beta_2 X_{ij}^{\text{reclit}}
+  + \beta_3 X_{ij}^{\text{gender}}
+  + \beta_4 X_{ij}^{\text{HISEI}}
+  + \varepsilon_{ij}$$
+
+We add three dyadic predictor matrices to test the following hypotheses:
+
+| Hypothesis | Operationalisation | Entry $X_{ij}$ |
+|---|---|---|
+| i. High-literacy receivers get *fewer* nominations | **Receiver literacy** | $\text{literacy\_end}_j$ |
+| ii. Same-gender pairs more likely to nominate | **Same gender** | $\mathbf{1}[\text{gender}_i = \text{gender}_j]$ |
+| iii. High-HISEI senders nominate *more* | **Sender HISEI** | $\text{HISEI}_i$ |
+
+**Why these operationalisations?**
+
+- *Hypothesis i* is an **alter (receiver) effect**: variation in how often a
+  node is *chosen* is captured by a column-constant matrix whose entry in
+  column $j$ equals $j$'s literacy score.
+- *Hypothesis ii* is a **homophily / dyadic covariate**: a binary indicator
+  equals 1 when sender and receiver share the same gender.
+- *Hypothesis iii* is an **ego (sender) effect**: variation in how many
+  nominations a node *sends* is captured by a row-constant matrix whose entry
+  in row $i$ equals $i$'s HISEI score.
+
+---
+
+# Task 2.3 – MR-QAP Estimation for Classroom 10
+
+```{r full-qap-10}
+fit10 <- run_qap(dat10, reps = 5000)
+summary(fit10)
+```
+
+```{r tidy-10}
+tidy10 <- tidy_netlm(fit10, "10")
+knitr::kable(tidy10, digits = 4,
+             caption = "MR-QAP coefficients – Classroom 10")
+```
+
+## Interpretation
+
+The QAP permutation test randomly shuffles row and column labels of the
+response matrix to obtain the null distribution of each coefficient; the
+reported $p$-value (`pgreqabs`) is the proportion of permuted coefficients at
+least as extreme (in absolute value) as the observed one.
+
+| Term | Expected direction | Observed | Supported? |
+|---|---|---|---|
+| `W1_lag` | positive (stability) | `r round(tidy10$estimate[tidy10$term=="W1_lag"],3)` ($p$ = `r round(tidy10$p_value[tidy10$term=="W1_lag"],3)`) | Yes |
+| `recv_literacy` | negative (H i) | `r round(tidy10$estimate[tidy10$term=="recv_literacy"],3)` ($p$ = `r round(tidy10$p_value[tidy10$term=="recv_literacy"],3)`) | See text |
+| `same_gender` | positive (H ii) | `r round(tidy10$estimate[tidy10$term=="same_gender"],3)` ($p$ = `r round(tidy10$p_value[tidy10$term=="same_gender"],3)`) | See text |
+| `send_HISEI` | positive (H iii) | `r round(tidy10$estimate[tidy10$term=="send_HISEI"],3)` ($p$ = `r round(tidy10$p_value[tidy10$term=="send_HISEI"],3)`) | See text |
+
+- **Lagged network (W1):** The large, highly significant positive coefficient
+  confirms strong **friendship stability**.  A prior tie is by far the
+  strongest predictor of a future tie.
+
+- **Receiver literacy (H i):** A negative coefficient would indicate that
+  high-literacy students attract fewer nominations; a positive one would
+  indicate the opposite.  The sign and permutation $p$-value determine
+  whether this hypothesis is supported in Classroom 10.
+
+- **Same gender (H ii):** A positive, significant coefficient supports the
+  **gender-homophily** hypothesis: students preferentially nominate same-gender
+  peers.
+
+- **Sender HISEI (H iii):** A positive, significant coefficient would indicate
+  that students from higher socioeconomic backgrounds send more friendship
+  nominations.
+
+---
+
+# Task 2.4 – All Remaining Classrooms
+
+```{r all-classrooms, results='asis', cache=TRUE}
+all_results <- list()
+all_tidy    <- list()
+
+for (cl in classrooms) {
+  dat <- tryCatch(build_data(cl), error = function(e) NULL)
+  if (is.null(dat) || dat$n < 5) next
+
+  fit              <- run_qap(dat, reps = 5000)
+  all_results[[cl]] <- fit
+  all_tidy[[cl]]    <- tidy_netlm(fit, cl)
+
+  cat(sprintf("\n## Classroom %s (n = %d)\n\n", cl, dat$n))
+  print(knitr::kable(all_tidy[[cl]], digits = 4,
+                     caption = sprintf("Classroom %s", cl)))
+  cat("\n")
+}
+
+all_tidy_df <- do.call(rbind, all_tidy)
+```
+
+---
+
+# Task 2.5 – Cross-Classroom Summary and Generalisation
+
+## Combined coefficient table
+
+```{r combined-table}
+wide <- reshape(all_tidy_df,
+                idvar     = "classroom",
+                timevar   = "term",
+                direction = "wide")
+colnames(wide) <- gsub("estimate\\.", "", colnames(wide))
+colnames(wide) <- gsub("p_value\\.", "p_",  colnames(wide))
+knitr::kable(wide, digits = 3,
+             caption = "Coefficients and permutation p-values across all classrooms")
+```
+
+## Caterpillar plots
+
+Each panel shows the estimated coefficient for one predictor across all
+classrooms, sorted by effect size.  **Blue** points have $p < 0.05$;
+**grey** points are not statistically significant.  The dashed red line
+marks zero (no effect).
+
+```{r caterpillar, fig.height=8, fig.width=10}
+terms_plot <- c("W1_lag", "recv_literacy", "same_gender", "send_HISEI")
+term_labels <- c(
+  W1_lag        = "Lagged friendship (W1)",
+  recv_literacy = "Receiver literacy",
+  same_gender   = "Same gender",
+  send_HISEI    = "Sender HISEI"
+)
+
+par(mfrow = c(2, 2), mar = c(4, 4, 3, 1))
+for (trm in terms_plot) {
+  sub  <- all_tidy_df[all_tidy_df$term == trm, ]
+  sub  <- sub[order(sub$estimate), ]
+  cols <- ifelse(sub$p_value < 0.05, "steelblue", "grey60")
+
+  rng <- range(sub$estimate)
+  pad <- diff(rng) * 0.15
+
+  plot(sub$estimate, seq_len(nrow(sub)),
+       xlab  = "Coefficient estimate",
+       ylab  = "Classroom",
+       main  = term_labels[trm],
+       pch   = 19,
+       col   = cols,
+       yaxt  = "n",
+       xlim  = c(rng[1] - pad, rng[2] + pad))
+  axis(2, at = seq_len(nrow(sub)), labels = sub$classroom, las = 1)
+  abline(v = 0, lty = 2, col = "red")
+  legend("topright",
+         legend = c("p < 0.05", "p \u2265 0.05"),
+         col    = c("steelblue", "grey60"),
+         pch    = 19, cex = 0.75, bty = "n")
+}
+```
+
+## Significance count by predictor
+
+```{r sign-summary}
+sig_counts <- tapply(all_tidy_df$p_value < 0.05,
+                     all_tidy_df$term, sum)
+print(sig_counts)
+```
+
+## Discussion
+
+**Friendship stability (`W1_lag`):** The lagged wave-1 network has a positive
+and statistically significant coefficient in nearly every classroom.  This is
+the most robust finding: friendships formed at the start of the school year
+largely persist until the end, consistent with what the literature describes
+as *tie persistence* or *network inertia*.
+
+**Receiver literacy (Hypothesis i):** The direction and significance of this
+coefficient vary across classrooms, suggesting the relationship between
+academic achievement and popularity is not uniform.  In some classrooms a
+negative coefficient (fewer nominations for high-literacy students) appears;
+in others the effect is negligible or reversed.  Hypothesis i therefore
+receives only *weak and inconsistent* support.
+
+**Same gender (Hypothesis ii):** Gender homophily—the tendency to nominate
+same-gender peers more often—is present in several classrooms with a positive
+coefficient.  However, the effect is not universally significant, indicating
+that gender segregation in peer nominations varies in strength across
+classroom contexts.
+
+**Sender HISEI (Hypothesis iii):** The association between socioeconomic
+status and outgoing friendship nominations is modest and inconsistent.
+High-HISEI students do not systematically nominate more friends in every
+setting, suggesting that this effect, if present, depends on classroom
+composition and context.
+
+**Generalisability:** The findings rest on only eight classrooms from a
+single Czech school cohort, limiting external validity.  The heterogeneity
+in effect sizes and significance levels across classrooms underscores that
+adolescent peer-network dynamics are context-dependent.  Classroom
+composition (gender ratio, HISEI distribution, class size) likely moderates
+individual effects.  A broader, multi-school sample would be required for
+generalisation.  Differences across classrooms for the gender and literacy
+predictors could reflect real variation in how these characteristics shape
+friendship selection, or they could reflect sampling variability given the
+relatively small number of students per classroom.
