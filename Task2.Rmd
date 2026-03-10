@@ -32,13 +32,13 @@ classrooms <- c("01", "02", "03", "04", "05", "09", "10", "12")
 
 ## Helper functions
 
+We begin by defining some helper functions. `build_data` is our cleaning pipeline, 
+`run_qap` is a cleaner expression of the `netlm` function, and `tidy_netlm` gets a tidy 
+dataframe from the `netlm` fit. 
+
 ```{r helpers}
 # Load an adjacency matrix from a cleaned CSV.
 # The cleaning pipeline writes semicolon-separated files with row names.
-# Classrooms 01-09 developed a leading-zero inconsistency during cleaning
-# (row names lost the leading zero, column names kept it).
-# We normalise both to the no-leading-zero form so that
-# intersect(rownames, colnames) works correctly across all classrooms.
 load_adj <- function(file) {
   mat_raw <- read.csv(file, sep = ";", row.names = 1,
                       header = TRUE, check.names = FALSE)
@@ -129,8 +129,6 @@ tidy_netlm <- function(fit, classroom) {
 ## Load attribute data
 
 ```{r load-attr}
-# cleaned_attr.csv: comma-separated, produced by cleaning.R (na.omit applied,
-# so only students with complete literacy_end, HISEI, and gender are kept).
 attr_raw <- read.csv(attr_file, sep = ",", stringsAsFactors = FALSE)
 attr_raw$studentID <- as.character(attr_raw$studentID)
 ```
@@ -146,7 +144,7 @@ lagged network as the only predictor:
 $$Y_{ij}^{W2} = \beta_0 + \beta_1 \cdot Y_{ij}^{W1} + \varepsilon_{ij}$$
 
 The **null hypothesis** is that the observed association between $W1$ and $W2$
-could arise by chance under random permutation of the network.
+is weak enough such that it could reasonably arise by chance under random permutation of the network.
 
 ```{r simple-qap-10}
 dat10 <- build_data("10")
@@ -157,12 +155,11 @@ fit10_simple <- netlm(dat10$Y, list(dat10$X_w1),
 summary(fit10_simple)
 ```
 
-**Interpretation:** The coefficient on the lagged Wave-1 network is positive
-and statistically significant ($p < 0.05$), indicating that friendship ties
-present at Wave 1 are strongly predictive of ties at Wave 2.  This is
-consistent with *friendship stability* (tie persistence / network inertia):
-students who were friends at the beginning of the school year largely remain
-friends by the end.
+**Interpretation:** The coefficient on the lagged Wave-1 network is positive ($\beta_1 \approx 0.52$)
+and significant at the 5% level, which means we can reject the null. 
+Friendships present at Wave 1 are strongly predictive of ties at Wave 2. This is what we'd 
+expect to see intuitively: friendships are stable across time (relatively, at least--this is high school, after all). In network science terminology, 
+we could say that our network has some intertia or tie-persistence. 
 
 ---
 
@@ -185,13 +182,13 @@ We add three dyadic predictor matrices to test the following hypotheses:
 | ii. Same-gender pairs more likely to nominate | **Same gender** | $\mathbf{1}[\text{gender}_i = \text{gender}_j]$ |
 | iii. High-HISEI senders nominate *more* | **Sender HISEI** | $\text{HISEI}_i$ |
 
-**Why these operationalisations?**
+We tried to choose the simplest possible representation of each effect. 
 
 - *Hypothesis i* is an **alter (receiver) effect**: variation in how often a
   node is *chosen* is captured by a column-constant matrix whose entry in
   column $j$ equals $j$'s literacy score.
 - *Hypothesis ii* is a **homophily / dyadic covariate**: a binary indicator
-  equals 1 when sender and receiver share the same gender.
+  equals 1 when sender and receiver share the same gender. No other encoding would make sense here. 
 - *Hypothesis iii* is an **ego (sender) effect**: variation in how many
   nominations a node *sends* is captured by a row-constant matrix whose entry
   in row $i$ equals $i$'s HISEI score.
@@ -200,10 +197,14 @@ We add three dyadic predictor matrices to test the following hypotheses:
 
 # Task 2.3 – MR-QAP Estimation for Classroom 10
 
+We re-run the model...
+
 ```{r full-qap-10}
 fit10 <- run_qap(dat10, reps = 5000)
 summary(fit10)
 ```
+
+...and obtain:
 
 ```{r tidy-10}
 tidy10 <- tidy_netlm(fit10, "10")
@@ -214,37 +215,43 @@ knitr::kable(tidy10, digits = 4,
 ## Interpretation
 
 The QAP permutation test randomly shuffles row and column labels of the
-response matrix to obtain the null distribution of each coefficient; the
+response matrix to obtain the null distribution of each coefficient. The
 reported $p$-value (`pgreqabs`) is the proportion of permuted coefficients at
 least as extreme (in absolute value) as the observed one.
 
 | Term | Expected direction | Observed | Supported? |
 |---|---|---|---|
 | `W1_lag` | positive (stability) | `r round(tidy10$estimate[tidy10$term=="W1_lag"],3)` ($p$ = `r round(tidy10$p_value[tidy10$term=="W1_lag"],3)`) | Yes |
-| `recv_literacy` | negative (H i) | `r round(tidy10$estimate[tidy10$term=="recv_literacy"],3)` ($p$ = `r round(tidy10$p_value[tidy10$term=="recv_literacy"],3)`) | See text |
-| `same_gender` | positive (H ii) | `r round(tidy10$estimate[tidy10$term=="same_gender"],3)` ($p$ = `r round(tidy10$p_value[tidy10$term=="same_gender"],3)`) | See text |
-| `send_HISEI` | positive (H iii) | `r round(tidy10$estimate[tidy10$term=="send_HISEI"],3)` ($p$ = `r round(tidy10$p_value[tidy10$term=="send_HISEI"],3)`) | See text |
+| `recv_literacy` | negative | `r round(tidy10$estimate[tidy10$term=="recv_literacy"],3)` ($p$ = `r round(tidy10$p_value[tidy10$term=="recv_literacy"],3)`) | No |
+| `same_gender` | positive | `r round(tidy10$estimate[tidy10$term=="same_gender"],3)` ($p$ = `r round(tidy10$p_value[tidy10$term=="same_gender"],3)`) | Yes |
+| `send_HISEI` | positive | `r round(tidy10$estimate[tidy10$term=="send_HISEI"],3)` ($p$ = `r round(tidy10$p_value[tidy10$term=="send_HISEI"],3)`) | No |
 
-- **Lagged network (W1):** The large, highly significant positive coefficient
-  confirms strong **friendship stability**.  A prior tie is by far the
-  strongest predictor of a future tie.
+We now comment on each hypothesis: 
 
-- **Receiver literacy (H i):** A negative coefficient would indicate that
-  high-literacy students attract fewer nominations; a positive one would
-  indicate the opposite.  The sign and permutation $p$-value determine
-  whether this hypothesis is supported in Classroom 10.
+- *Lagged network (W1):* Even when controlling for three further variables, 
+ we find that the tie persistence property is well-supported at the 5%-level.
+ In fact, of the correlates investigated, being friends in a prior period is the 
+ strongest determinant of current friendship together with gender (the effect strength is equal).
 
-- **Same gender (H ii):** A positive, significant coefficient supports the
-  **gender-homophily** hypothesis: students preferentially nominate same-gender
-  peers.
+- *Receiver literacy.* We were asked to test the one-sided hypothesis that literacy scores 
+  negatively correlate with friendship nominations. That means we would have expected a negative coefficient. 
+  We found no evidence of this: the parameter estimate was close to zero and not supported at the 5% level. We fail to reject the null. 
 
-- **Sender HISEI (H iii):** A positive, significant coefficient would indicate
-  that students from higher socioeconomic backgrounds send more friendship
-  nominations.
+- *Same gender.* A positive, significant coefficient supports the
+  gender-homophily hypothesis: students prefer being friends with same-gender
+  peers. Interestingly, the effect strength (and significance) is very close to the tie persistence hypothesis. 
+
+- *Sender HISEI.* A positive, significant coefficient would indicate
+  that students from higher socioeconomic backgrounds tend to send more friendship
+  nominations. As with the literacy hypothesis, we find no conclusive information. The 
+  estimate is close to zero and the significance is far too low to reject at the 5% level. (In fact, 
+  a p-value of 0.18 indicates that we'd expect to see such an effect in every fifth simulated network.) 
 
 ---
 
 # Task 2.4 – All Remaining Classrooms
+
+We re-run our analysis and provide output tables. In broad strokes, our findings remain broadly the same. There are some aberrations--we comment on these in 6.4. 
 
 ```{r all-classrooms, results='asis', cache=TRUE}
 all_results <- list()
@@ -271,25 +278,20 @@ all_tidy_df <- do.call(rbind, all_tidy)
 
 # Task 2.5 – Cross-Classroom Summary and Generalisation
 
-## Combined coefficient table
+Overall, we have found the following significant effects: 
 
-```{r combined-table}
-wide <- reshape(all_tidy_df,
-                idvar     = "classroom",
-                timevar   = "term",
-                direction = "wide")
-colnames(wide) <- gsub("estimate\\.", "", colnames(wide))
-colnames(wide) <- gsub("p_value\\.", "p_",  colnames(wide))
-knitr::kable(wide, digits = 3,
-             caption = "Coefficients and permutation p-values across all classrooms")
+```{r sign-summary}
+sig_counts <- tapply(all_tidy_df$p_value < 0.05,
+                     all_tidy_df$term, sum)
+print(sig_counts)
 ```
+
 
 ## Caterpillar plots
 
+We now visualize our data via caterpillar plots. 
 Each panel shows the estimated coefficient for one predictor across all
-classrooms, sorted by effect size.  **Blue** points have $p < 0.05$;
-**grey** points are not statistically significant.  The dashed red line
-marks zero (no effect).
+classrooms, sorted by effect size.  Blue points are significant at the $p < 0.05$ level. 
 
 ```{r caterpillar, fig.height=8, fig.width=10}
 terms_plot <- c("W1_lag", "recv_literacy", "same_gender", "send_HISEI")
@@ -326,24 +328,16 @@ for (trm in terms_plot) {
 }
 ```
 
-## Significance count by predictor
-
-```{r sign-summary}
-sig_counts <- tapply(all_tidy_df$p_value < 0.05,
-                     all_tidy_df$term, sum)
-print(sig_counts)
-```
-
 ## Discussion
 
 **Friendship stability (`W1_lag`):** The lagged wave-1 network has a positive
 and statistically significant coefficient in nearly every classroom.  This is
-the most robust finding: friendships formed at the start of the school year
+our most robust finding: friendships formed at the start of the school year
 largely persist until the end, consistent with what the literature describes
 as *tie persistence* or *network inertia*.
 
 **Receiver literacy (Hypothesis i):** The direction and significance of this
-coefficient vary across classrooms, suggesting the relationship between
+coefficient varies across classrooms, suggesting the relationship between
 academic achievement and popularity is not uniform.  In some classrooms a
 negative coefficient (fewer nominations for high-literacy students) appears;
 in others the effect is negligible or reversed.  Hypothesis i therefore
@@ -351,15 +345,17 @@ receives only *weak and inconsistent* support.
 
 **Same gender (Hypothesis ii):** Gender homophily—the tendency to nominate
 same-gender peers more often—is present in several classrooms with a positive
-coefficient.  However, the effect is not universally significant, indicating
-that gender segregation in peer nominations varies in strength across
-classroom contexts.
+coefficient.  However, the effect is not universally significant (e.g. classrooms 2 and 14). 
+The reasons for this would merit further research. Are there other variables that describe 
+when (and, if we took a causal view, why) gender homophily breaks down? 
 
 **Sender HISEI (Hypothesis iii):** The association between socioeconomic
 status and outgoing friendship nominations is modest and inconsistent.
 High-HISEI students do not systematically nominate more friends in every
 setting, suggesting that this effect, if present, depends on classroom
-composition and context.
+composition and context. We do find that classroom 9's socioeconomic hypothesis 
+is (just barely) significant at the 5% level. We are cautious and chalk this up to multiple testing: a 5% significance means that we'd expect a significant 
+effect for every 20 hypotheses by pure chance. We have tested far more than 20. Further, the coefficient value ($\approx 0.0021$) is hardly inspiring. 
 
 **Generalisability:** The findings rest on only eight classrooms from a
 single Czech school cohort, limiting external validity.  The heterogeneity
