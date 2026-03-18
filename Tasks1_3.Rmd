@@ -1,0 +1,357 @@
+---
+title: "Assignment 1 Network Modelling"
+author: "Semeli Ergatoudi"
+output:
+  word_document: default
+  pdf_document: default
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(sna)
+library(network)
+```
+
+# Task 1.1
+
+There are $\binom{n}{2}=\binom{22}{2}=231$ pupils, so the total number of ties amongst them are  
+$n(n-1)=22*21=462$.  
+We are  given that there are $m=134$ ties in the network, therefore the probability p of observing a tie is  
+$p=\frac{m}{n(n-1)}=\frac{134}{462}=0.290$
+
+
+# Task 1.2
+
+There is a total of *n choose 2* possible dyads.
+The probability of observing a mutual dyad is  
+$p_M=\frac{M}{231}=0.182$  
+The probability of observing an asymmetric dyad is  
+$p_A=\frac{A}{231}=0.217$  
+The probability of observing a null dyad is  
+$p_N=\frac{N}{231}=0.602$  
+
+
+# Task 1.3
+
+Assuming independence:  
+The probability of a mutual dyad is:  
+$p'_M=P(X_{ij}=1)P(X_{ji}=1)=p^2=0.084$
+
+The probability of a null dyad is:  
+$p'_N=P(X_{ij}=0)P(X_{ji}=0)=(1-p)^2=0.412$
+
+The probability of an asymmetric dyad is:  
+$p'A=P(X_{ij}=1)P(X_{ji}=0)+P(X_{ij}=0)P(X_{ji}=1)=2p(1-p)=0.504$
+
+# Task 1.4
+
+The probability of mutual dyads observed is much higher than when assuming independence.
+For asymmetric dyads, the probability observed is almost half compared to when assuming independence.
+For null dyads, the observed probability is again higher than when assuming independence.
+This suggests dependence between dyads, and therefore it would not be reasonable to assume independence.
+
+# Task 1.5
+
+If we have a model that assumes that all nodes have an outdegree of 9 (d=9), then  
+$P(X_{ij}=1)=\frac{9}{21}=0.429$  
+Then, assuming independence the probability of a mutual tie is:  
+$p''_M=P(X_{ij}=1)^2=\frac{9}{49}=0.184$  
+This mutual tie probability of 0.184 is very close to the observed probability that we calculated in part (2) which was 0.182.
+While this suggests that this could be a good approximation, the model is quite unreasonable and independence still might not be a good assumption, since we fix $d=9$. This model has a density much higher than the observed network, and it only reaches the correct probability of mutual ties, since it has way more ties overall (22*9=198 ties) than the observed network (134 observed ties).
+
+
+# Task 1.6
+
+```{r}
+set.seed(161)
+library(sna)
+library(network)
+
+obsMat <- as.matrix(read.csv2("classrooms/10_W1.csv", header = TRUE, row.names = 1, check.names = FALSE))
+
+
+#data cleaning
+na_nodes <- which(rowSums(is.na(obsMat)) == ncol(obsMat))
+
+obsMat_clean <- obsMat[-na_nodes, -na_nodes, drop = FALSE]
+
+
+
+cguRec <- cug.test(obsMat_clean, grecip, cmode = "edges", reps=5000)
+cugInd <- cug.test(obsMat_clean, centralization, cmode="edges", FUN.arg=list(FUN=degree, cmode="indegree"), reps=5000)
+cugTrans <- cug.test(obsMat_clean, gtrans, cmode = "dyad.census", reps=5000)
+
+```
+
+# Task 1.6.1
+
+**cguRec:**  
+The null hypothesis is $H_0:$ The observed reciprocity is what we would expect in a random network with the same number of edges.  
+The alternative hypothesis is $H_1:$ The observed reciprocity is different than what we would expect in a random network with the same number of edges.
+
+**cugInd:**  
+The null hypothesis is $H_0:$ The observed indegree centralization is what we would expect in a random network with the same number of edges.  
+The alternative hypothesis is $H_1:$ The observed indegree centalization is different than what we would expect in a random network with the same number of edges.
+
+**cugTrans:**  
+The null hypothesis is $H_0:$ The observed transitivity is what we would expect in a random network with the same number of edges.  
+The alternative hypothesis is $H_1:$ The observed transitivity is different than what we would expect in a random network with the same number of edges.
+
+
+# Task 1.6.2
+
+For the **cguRec** test we get the following results:
+```{r echo=FALSE}
+print(cguRec)
+```
+
+The observed value is 0.774 and the p-values are $Pr(X>=Obs)=0$, $Pr(X<=Obs)=1$.
+This means that the observed reciprocity is significantly larger than expected.
+In fact, none of the simulated models produced reciprocity as high as the observed one.
+Therefore, there is a strong tendency for reciprocated ties in the network.
+
+
+For the **cugInd** test we get the following results:
+```{r echo=FALSE}
+print(cugInd)
+```
+
+The observed value is 0.202 and the p-values are $Pr(X>=Obs)=0.7712$, $Pr(X<=Obs)=0.6252$.
+This means that the observed indegree centralization in not significantly different from what we would expect in a random network.
+
+
+For the **cugTrans** test we get the following results:
+```{r echo=FALSE}
+print(cugTrans)
+```
+
+The observed value is 0.536 and the p-values are $Pr(X>=Obs)=0$, $Pr(X<=Obs)=1$.
+This means that the observed transitivity is significantly larger than expected.
+In fact, none of the simulated models produced transitivity as high as the observed one.
+Therefore, there is a strong tendency for transitive ties in the network.
+
+
+
+# Task 3.5
+
+We repeat the analysis in (3) for the rest of the classrooms:
+```{r}
+library(sna)
+library(network)
+
+attr_full <- read.csv('/Users/semel/OneDrive - ETH Zurich/ETH/Network Modelling/Assignment1/Lintner/cleaned_csv/cleaned_attr.csv', sep=";", header=TRUE)
+
+classroom_ids <- unique(attr_full$classroomID)
+
+results_list <- list()
+
+for (cls in classroom_ids) {
+
+  cat("Classroom:", cls, "\n")
+  
+  network_file <- paste0('/Users/semel/OneDrive - ETH Zurich/ETH/Network Modelling/Assignment1/Lintner/cleaned_csv/cleaned_', sprintf('%02d', cls), '_W2.csv')
+  
+  if (!file.exists(network_file)) {
+    cat("No Wave 2 network file found for classroom", cls, "- skipping.\n")
+    next
+  }
+  
+  network_w2 <- read.csv(network_file, sep=";", header=TRUE, row.names=1)
+  network_matrix <- as.matrix(network_w2)
+  
+  classroom_attr <- attr_full[attr_full$classroomID == cls, ]
+
+  student_ids_in_network <- rownames(network_matrix)
+  attr_matched <- classroom_attr[match(student_ids_in_network, as.character(classroom_attr$X)), ]
+  
+  valid_indices <- complete.cases(attr_matched[, c("literacy_end", "gender", "HISEI")])
+  
+  if (sum(valid_indices) < 3) {
+    cat("Not enough complete cases for classroom", cls, "- skipping.\n")
+    next
+  }
+  
+  network_matrix_clean <- network_matrix[valid_indices, valid_indices]
+  attr_final <- attr_matched[valid_indices, ]
+  
+  y <- as.numeric(attr_final$literacy_end)
+  x_vars <- cbind(
+    gender = as.numeric(as.factor(attr_final$gender)),
+    hisei  = as.numeric(attr_final$HISEI)
+  )
+  
+  nam_model <- lnam(y = y, x = x_vars, W1 = network_matrix_clean)
+  
+  print(summary(nam_model))
+  
+  results_list[[as.character(cls)]] <- nam_model
+}
+
+```
+
+
+
+We summarize the results in a table:
+```{r}
+results_table <- data.frame(
+  Class = c(1,2,3,4,5,9,10,12),
+  Rho_Est = c(0.009, 0.017, 0.027, -0.012, 0.018, -0.064, -0.044, 0.032),
+  Rho_p = c(0.496, 0.479, 0.514, 0.631, 0.163, 0.108, 0.056, 0.089),
+  Gender_Est = c(-4.10, 8.99, -2.71, 8.88, 6.76, 20.30, -4.42, 8.21),
+  Gender_p = c(0.621, 0.348, 0.652, 0.384, 0.215, 0.014, 0.454, 0.317),
+  HISEI_Est = c(0.980, 0.392, 0.684, 0.776, 0.665, 0.647, 1.401, 0.191),
+  HISEI_p = c(1.12e-05, 0.126, 0.001, 0.002, 1.07e-06, 0.018, 1.38e-12, 0.445),
+  R2 = c(0.313, 0.138, 0.278, 0.158, 0.163, 0.219, 0.597, 0.198)
+)
+knitr::kable(results_table, digits = 3, caption = "Network Autocorrelation Model Results by Classroom")
+```
+
+
+We interpret the results:  
+
+**Classroom 1:**  
+The model estimates a rho of 0.009  with a p-value of 0.496.  
+The p-value is much greater than 0.05, so we fail to reject the null hypothesis of no autocorrelation.
+This suggests that there is no significant evidence that students' literacy scores are influenced by those of their friends in this classroom.
+The gender variable's estimated coefficient is -4.10
+This suggests that male students score on average about 4.1 points lower than female students in literacy;
+however, this coefficient is not statistically significant (p-value = 0.621). 
+In contrast, the HISEI coefficient with an estimate of 0.980 is highly statistically significant (p-value = 1.12e-05).
+This indicates that a 1-unit increase in socio-economic status is associates with about 1-point increase in literacy score assuming that all other variables remain constant.
+The coefficient of determination is $R^2 = 0.313$, meaning that the model explains approximately 31% of the variation in literacy scores, although the adjusted $R^2$ suggests moderate explanatory power.
+
+**Classroom 2:**  
+The model estimates a rho of 0.017  with a p-value of 0.479.  
+The p-value is much greater than 0.05, so we fail to reject the null hypothesis of no autocorrelation.
+This suggests that there is no significant evidence that students' literacy scores are influenced by those of their friends in this classroom.
+The gender variable's estimated coefficient is 8.99
+This suggests that male students score on average about 9 points higher than female students in literacy;
+however, this coefficient is not statistically significant (p-value = 0.348). 
+Similarly, The HISEI coefficient with an estimate of 0.392 is also statistically insignificant (p-value = 0.126), indicating that the socio-economic status does not have a significant association with literacy scores in this classroom.
+The coefficient of determination is $R^2=0.138$, indicating that the model explains about 14% of the variation in literacy scores. The adjusted $R^2$ is slightly negative, meaning that the explanatory variables provide limited explanatory power.
+
+**Classroom 3:**  
+The model estimates a rho of 0.027  with a p-value of 0.514.  
+The p-value is much greater than 0.05, so we fail to reject the null hypothesis of no autocorrelation.
+This suggests that there is no significant evidence that students' literacy scores are influenced by those of their friends in this classroom.
+The gender variable's estimated coefficient is -2.71.
+This suggests that male students score on average about 2.7 points lower than female students in literacy;
+however, this coefficient is not statistically significant (p-value = 0.652).
+In contrast, the HISEI coefficient with an estimate of 0.684 is highly statistically significant (p-value = 0.001).
+This indicates that a 1-unit increase in socio-economic status is associates with about 0.7-point increase in literacy score assuming that all other variables remain constant.
+The coefficient of determination is $R^2 = 0.278$, meaning that the model explains approximately 28% of the variation in literacy scores, although the adjusted $R^2$ suggests moderate explanatory power.
+
+
+**Classroom 4:**  
+The model estimates a rho of -0.012  with a p-value of 0.631.  
+The p-value is much greater than 0.05, so we fail to reject the null hypothesis of no autocorrelation.
+This suggests that there is no significant evidence that students' literacy scores are influenced by those of their friends in this classroom.
+The gender variable's estimated coefficient is 8.88.
+This suggests that male students score on average about 8.9 points higher than female students in literacy;
+however, this coefficient is not statistically significant (p-value = 0.384).
+In contrast, the HISEI coefficient with an estimate of 0.776 is highly statistically significant (p-value = 0.002).
+This indicates that a 1-unit increase in socio-economic status is associates with about 0.8-point increase in literacy score assuming that all other variables remain constant.
+The coefficient of determination is $R^2=0.158$, indicating that the model explains about 16% of the variation in literacy scores. The adjusted $R^2$ is slightly negative, meaning that the explanatory variables provide limited explanatory power.
+
+
+**Classroom 5:**  
+The model estimates a rho of 0.018  with a p-value of 0.163.  
+The p-value is greater than 0.05, so we fail to reject the null hypothesis of no autocorrelation.
+This suggests that there is no significant evidence that students' literacy scores are influenced by those of their friends in this classroom.
+The gender variable's estimated coefficient is 6.76.
+This suggests that male students score on average about 6.8 points higher than female students in literacy;
+however, this coefficient is not statistically significant (p-value = 0.215).
+In contrast, the HISEI coefficient with an estimate of 0.665 is highly statistically significant (p-value = 1.07e-06).
+This indicates that a 1-unit increase in socio-economic status is associates with about 0.67-point increase in literacy score assuming that all other variables remain constant.
+The coefficient of determination is $R^2=0.163$, indicating that the model explains about 16% of the variation in literacy scores, although the adjusted $R^2$ suggests limited explanatory power.
+
+
+**Classroom 9:**  
+The model estimates a rho of -0.064  with a p-value of 0.108.  
+The p-value is greater than 0.05, so we fail to reject the null hypothesis of no autocorrelation.
+However, the result is marginally close to statistical significance, suggesting weak evidence of a negative network relationship, although it is not statistically significant.
+The gender coefficient is statistically significant (p-value = 0.014) and the estimated coefficient is 20.30.
+This suggests that male students score on average about 20 points higher than female students in literacy.
+The HISEI coefficient with an estimate of 0.647 is also  statistically significant (p-value = 0.018).
+This indicates that a 1-unit increase in socio-economic status is associates with about 0.65-point increase in literacy score assuming that all other variables remain constant.
+The coefficient of determination is $R^2=0.219$, indicating that the model explains about 22% of the variation in literacy scores, although the adjusted $R^2$ suggests limited explanatory power.
+
+
+**Classroom 12:**  
+The model estimates a rho of 0.032  with a p-value of 0.089.  
+The p-value is greater than 0.05, but below 0.10, suggesting weak evidence of positive network autocorrelation.
+This suggests that students’ literacy scores may be somewhat positively associated with the literacy scores of their friends, although the evidence is only marginal.
+The gender variable's estimated coefficient is 8.21.
+This suggests that male students score on average about 8.2 points higher than female students in literacy;
+however, this coefficient is not statistically significant (p-value = 0.317).
+The HISEI coefficient with an estimate of 0.191 is statistically insignificant (p-value = 0.445).
+This indicates that socio-economic status does not appear to have a significant association with literacy score in this classroom.
+The coefficient of determination is $R^2=0.198$, indicating that the model explains about 20% of the variation in literacy scores, although the adjusted $R^2$ suggests limited explanatory power.
+
+
+# Task 3.6
+Across all classrooms, there is little evidence which supports the network autocorrelation hypothesis.
+In most classrooms the estimated rho network autocorrelation parameter is statistically insignificant, indicating that in general, student's literacy scores are generally not strongly associated with the other student's literacy scores. Only a couple classrooms (10 and 12) show some weak evidence of network autocorrelation, where the p-values are close to significance thresholds.  
+
+The gender variable only appeared to be statistically significant for Classroom 9, where male students tended to have much higher literacy scores compared to female students. However, gender appeared to be statistically insignificant in the rest of the classrooms.
+
+Socio-economic status on the other hand tended to have a stronger relationship with literacy scores. In most classrooms (1,3,4,5,9 and 10), the HISEI coefficient was statistically significant. This suggests that students with higher socio-economic status tended to achieve higher literacy scores.  
+
+The coefficient of determination $R^2$ observed across classrooms tended to be low, with Classroom 10 having the largest value of $R^2$. However, in most classrooms the models seemed to explain only a small proportion of variation in literacy scores, indicating that other factors that were not included in the model may be statistically significant for their effect on literacy scores
+
+Overall, these results suggest that the autocorrelation hypothesis is not strongly supported in this dataset, while other factors such as the socio-economic status appeared to be more significant in explaining literacy scores.
+These results vary across classrooms and therefore they should be not generalizable to other classrooms or to other populations.
+
+
+We now visualize the results across classrooms, to summarize the estimated network autocorrelation effects and the relationship between HISEI and literacy scores.
+
+
+```{r rho-caterpillar-plot, fig.width=7, fig.height=5}
+results_summary <- data.frame(
+  classroom = c(1, 2, 3, 4, 5, 9, 10, 12),
+  estimate = c(0.008571, 0.01655, 0.02676, -0.01222, 0.01787, -0.06437, -0.04422, 0.03221),
+  p_value = c(0.496, 0.479, 0.514, 0.631, 0.163, 0.1077, 0.0556, 0.0886)
+)
+
+sub <- results_summary[order(results_summary$estimate), ]
+
+cols <- ifelse(sub$p_value < 0.05, "steelblue", "grey60")
+
+rng <- range(sub$estimate)
+pad <- diff(rng) * 0.15
+
+par(mar = c(4, 4, 3, 1))
+
+plot(sub$estimate, seq_len(nrow(sub)),
+     xlab = "Coefficient estimate",
+     ylab = "Classroom",
+     main = expression("Network autocorrelation (" * hat(rho) * ")"),
+     pch = 19,
+     col = cols,
+     yaxt = "n",
+     xlim = c(rng[1] - pad, rng[2] + pad))
+
+axis(2, at = seq_len(nrow(sub)), labels = sub$classroom, las = 1)
+abline(v = 0, lty = 2, col = "red")
+legend("topright",
+       legend = c("p < 0.05", "p \u2265 0.05"),
+       col = c("steelblue", "grey60"),
+       pch = 19, cex = 0.75, bty = "n")
+```
+
+The caterpillar plot shows that the estimated network autocorrelation coefficients are generally close to zero and not statistically significant. This suggests that friendship networks do not consistently influence literacy scores across classrooms, providing little support for the network autocorrelation hypothesis.
+
+
+```{r literacy_hisei_scatter, fig.width=6, fig.height=5}
+plot(attr_final$HISEI, attr_final$literacy_end,
+     xlab = "HISEI (Socio-economic status)",
+     ylab = "Literacy score",
+     main = "Literacy scores vs socio-economic status",
+     pch = 19,
+     col = "steelblue")
+
+abline(lm(literacy_end ~ HISEI, data = attr_final),
+       col = "red",
+       lwd = 2)
+```
+
+The scatterplot illustrates the relationship between students’ socio-economic status (HISEI) and their literacy scores. The points appear widely dispersed and the fitted regression line shows a slight negative slope. This suggests that there is no clear positive relationship between HISEI and literacy scores in this subset of the data. The large spread of the observations indicates substantial variability in literacy outcomes that cannot be explained by socio-economic status alone.
